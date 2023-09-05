@@ -1,0 +1,90 @@
+stages:
+  - lint
+  - format
+  - build
+  - deploy
+
+lint:
+  stage: lint
+  image: node:latest
+  script:
+    - |
+      if git diff --quiet HEAD^ HEAD -- '**/*.js' '**/*.json'; then
+        echo "No changes in repository. Skipping linting."
+      else
+        npm ci --silent || npm install --silent
+        npx eslint --ext .js,.json --ignore-pattern 'coverage-final.json' --ignore-pattern 'jsconfig.json' --ignore-pattern 'package-lock.json' --ignore-pattern 'package.json' --ignore-pattern '.eslintrc.json' --rule 'indent: ["error", 2]' --rule 'semi: ["error", "always"]' --rule 'quotes: ["error", "single"]' $(git diff --name-only HEAD^ HEAD -- '**/*.js' '**/*.json') --fix > lint-report/lint-errors.txt || (exit 0)
+        if [ -s "lint-report/lint-errors.txt" ]; then
+          echo "Linting errors found. Check lint-report/lint-errors.txt for details."
+        else
+          echo "No linting errors found."
+        fi
+      fi
+  artifacts:
+    paths:
+      - lint-report/
+  rules:
+    - changes:
+        - "**/*.js"
+        - "**/*.json"
+
+
+format:
+  stage: format
+  image: node:latest
+  script:
+    - |
+      if git diff --quiet HEAD^ HEAD -- '**/*.js' '**/*.json'; then
+        echo "No changes in .js and .json files. Skipping code formatting."
+        exit 0
+      else
+        npm ci --silent || npm install --silent
+        npx prettier --write $(git diff --name-only HEAD^ HEAD -- '**/*.js' '**/*.json')
+      fi
+  rules:
+    - changes:
+        - "**/*.js"
+        - "**/*.json"
+
+build:
+  stage: build
+  image: docker:latest
+  services:
+    - docker:dind
+  before_script:
+    - apk add --no-cache git
+  script:
+    - |
+      if git diff --quiet HEAD^ HEAD -- '**/*.js' '**/*.json'; then
+        echo "No changes in repository. Skipping build."
+        exit 0
+      else
+        docker build -t registry.gitlab.com/hardi.kakalaw/toys .
+        docker push registry.gitlab.com/hardi.kakalaw/toys
+      fi
+  rules:
+    - changes:
+        - "**/*.js"
+        - "**/*.json"
+
+deploy:
+  stage: deploy
+  image: docker:latest
+  services:
+    - docker:dind
+  before_script:
+    - apk add --no-cache git
+  script:
+    - |
+      if git diff --quiet HEAD^ HEAD -- '**/*.js' '**/*.json'; then
+        echo "No changes in repository. Skipping deploy."
+        exit 0
+      fi
+
+      echo "glpat-5bTRPCFoGTPqqygybxbL" | docker login -u "hardi.kakalaw" --password-stdin "registry.gitlab.com"
+      docker pull registry.gitlab.com/hardi.kakalaw/toys
+      docker run -d -p 8080:8080 registry.gitlab.com/hardi.kakalaw/toys
+  rules:
+    - changes:
+        - "**/*.js"
+        - "**/*.json"
